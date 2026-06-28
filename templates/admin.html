@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Quản Lý Bản Quyền</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="min-h-screen bg-slate-900 text-slate-200 p-8">
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-4xl font-bold text-emerald-500 mb-8 flex items-center">
+            <i class="fa-solid fa-shield-halved mr-4"></i> License Management Dashboard
+        </h1>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Form Tạo Mới -->
+            <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl h-fit">
+                <h2 class="text-2xl font-bold text-white mb-6 border-b border-slate-700 pb-4">
+                    <i class="fa-solid fa-key mr-2"></i> Cấp Bản Quyền Mới
+                </h2>
+                
+                <form id="generateForm" onsubmit="generateLicense(event)">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Tên Khách Hàng</label>
+                        <input type="text" id="customer_name" required class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors" placeholder="Nguyễn Văn A">
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Machine ID (Mã Máy)</label>
+                        <input type="text" id="machine_id" required class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-emerald-400 font-mono focus:outline-none focus:border-emerald-500 transition-colors" placeholder="XXXX-XXXX-XXXX-XXXX">
+                    </div>
+                    
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-slate-400 mb-2">Ngày Hết Hạn</label>
+                        <input type="date" id="expire_date" required class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-emerald-500 transition-colors">
+                    </div>
+                    
+                    <button type="submit" id="btnGenerate" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-colors flex justify-center items-center">
+                        <i class="fa-solid fa-file-signature mr-2"></i> Sinh File License.key
+                    </button>
+                </form>
+            </div>
+
+            <!-- Bảng Thống Kê -->
+            <div class="lg:col-span-2 bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl overflow-hidden flex flex-col">
+                <h2 class="text-2xl font-bold text-white mb-6 border-b border-slate-700 pb-4 flex justify-between items-center">
+                    <span><i class="fa-solid fa-users mr-2"></i> Danh Sách Khách Hàng</span>
+                    <span id="total_customers" class="text-sm bg-slate-700 px-3 py-1 rounded-full text-emerald-400">0 khách</span>
+                </h2>
+                
+                <div class="overflow-x-auto flex-1">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-700 text-slate-400 text-sm">
+                                <th class="pb-3 px-2 font-medium">Tên Khách</th>
+                                <th class="pb-3 px-2 font-medium">Machine ID</th>
+                                <th class="pb-3 px-2 font-medium">Hết Hạn</th>
+                                <th class="pb-3 px-2 font-medium">Trạng Thái</th>
+                                <th class="pb-3 px-2 font-medium text-right">Hành Động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customerTableBody" class="text-sm">
+                            <!-- Rows via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Iframe to trigger download without reloading page -->
+    <iframe id="download_frame" style="display:none;"></iframe>
+
+    <!-- Modal Xem Nội Dung -->
+    <div id="viewModal" class="fixed inset-0 bg-black/70 hidden flex items-center justify-center z-50">
+        <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-2xl p-6 w-full max-w-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-emerald-400">Nội Dung License.key</h2>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-2xl"></i></button>
+            </div>
+            <pre id="modalContent" class="bg-slate-900 text-slate-300 p-4 rounded-lg overflow-auto max-h-96 text-sm font-mono border border-slate-700"></pre>
+            <div class="mt-4 flex justify-end">
+                <button onclick="closeModal()" class="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg font-medium transition-colors">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let customersData = [];
+
+        async function loadCustomers() {
+            try {
+                const res = await fetch('/api/customers');
+                const data = await res.json();
+                customersData = data.customers;
+                
+                const tbody = document.getElementById('customerTableBody');
+                document.getElementById('total_customers').innerText = `${customersData.length} khách`;
+                
+                let html = '';
+                const today = new Date().toISOString().split('T')[0];
+                
+                // Sắp xếp mới nhất lên đầu
+                [...customersData].reverse().forEach(c => {
+                    const isExpired = c.expire_date < today;
+                    const statusBadge = isExpired 
+                        ? `<span class="bg-red-900/30 text-red-400 border border-red-500/30 px-2 py-1 rounded text-xs"><i class="fa-solid fa-xmark mr-1"></i>Hết hạn</span>`
+                        : `<span class="bg-emerald-900/30 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-xs"><i class="fa-solid fa-check mr-1"></i>Active</span>`;
+                        
+                    html += `
+                        <tr class="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                            <td class="py-4 px-2 font-medium text-white">${c.customer_name}</td>
+                            <td class="py-4 px-2 font-mono text-emerald-400 text-xs">${c.machine_id}</td>
+                            <td class="py-4 px-2 text-slate-300">${c.expire_date}</td>
+                            <td class="py-4 px-2">${statusBadge}</td>
+                            <td class="py-4 px-2 text-right">
+                                <button onclick="viewLicense('${c.id}')" class="text-emerald-400 hover:text-emerald-300 mr-3" title="Xem nội dung Key">
+                                    <i class="fa-solid fa-eye"></i>
+                                </button>
+                                <button onclick="downloadLicense('${c.id}')" class="text-indigo-400 hover:text-indigo-300 mr-3" title="Tải lại file Key">
+                                    <i class="fa-solid fa-download"></i>
+                                </button>
+                                <button onclick="fillForm('${c.customer_name}', '${c.machine_id}')" class="text-blue-400 hover:text-blue-300 mr-3" title="Gia hạn/Cấp lại Key">
+                                    <i class="fa-solid fa-rotate"></i>
+                                </button>
+                                <button onclick="deleteCustomer('${c.id}')" class="text-red-400 hover:text-red-300" title="Xóa">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function generateLicense(e) {
+            e.preventDefault();
+            
+            const btn = document.getElementById('btnGenerate');
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Đang tạo...';
+            btn.disabled = true;
+            
+            const formData = new FormData();
+            formData.append('customer_name', document.getElementById('customer_name').value);
+            formData.append('machine_id', document.getElementById('machine_id').value);
+            formData.append('expire_date', document.getElementById('expire_date').value);
+            
+            try {
+                const res = await fetch('/api/generate', { method: 'POST', body: formData });
+                const data = await res.json();
+                
+                if (data.success) {
+                    // Trigger download
+                    document.getElementById('download_frame').src = `/api/download/${data.file}`;
+                    
+                    // Reset form and reload table
+                    document.getElementById('generateForm').reset();
+                    await loadCustomers();
+                    
+                    alert("Tạo Key thành công! File license.key đang được tải về.");
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {
+                alert("Lỗi kết nối Server!");
+            }
+            
+            btn.innerHTML = '<i class="fa-solid fa-file-signature mr-2"></i> Sinh File License.key';
+            btn.disabled = false;
+        }
+
+        async function deleteCustomer(id) {
+            if (!confirm("Bạn có chắc chắn muốn xóa khách hàng này không?")) return;
+            
+            const formData = new FormData();
+            formData.append('customer_id', id);
+            
+            await fetch('/api/delete', { method: 'POST', body: formData });
+            loadCustomers();
+        }
+
+        function fillForm(name, machineId) {
+            document.getElementById('customer_name').value = name;
+            document.getElementById('machine_id').value = machineId;
+            document.getElementById('expire_date').focus();
+        }
+
+        function viewLicense(id) {
+            const c = customersData.find(x => x.id === id);
+            if (!c || !c.license_data) return alert("Bản ghi này cũ quá nên chưa lưu Key vào DB. Xin hãy cấp lại Key mới.");
+            document.getElementById('modalContent').innerText = JSON.stringify(c.license_data, null, 4);
+            document.getElementById('viewModal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('viewModal').classList.add('hidden');
+        }
+
+        function downloadLicense(id) {
+            const c = customersData.find(x => x.id === id);
+            if (!c || !c.license_data) return alert("Bản ghi này cũ quá nên chưa lưu Key vào DB. Xin hãy cấp lại Key mới.");
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(c.license_data, null, 4));
+            const a = document.createElement('a');
+            a.href = dataStr;
+            a.download = "license.key";
+            a.click();
+        }
+
+        // Init
+        window.addEventListener('DOMContentLoaded', loadCustomers);
+    </script>
+</body>
+</html>

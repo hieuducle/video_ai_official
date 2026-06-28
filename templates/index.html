@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Making film AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; }
+        .scene-card { transition: all 0.2s; }
+        .scene-card:hover { border-color: #3b82f6; }
+    </style>
+</head>
+<body class="min-h-screen p-8 relative">
+    <div class="max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-4xl font-bold text-blue-500 flex items-center">
+                <i class="fa-solid fa-robot mr-4"></i> Making film AI
+            </h1>
+            <div class="flex items-center gap-4">
+                <button onclick="loginServer()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20">
+                    <i class="fa-solid fa-cloud mr-1"></i> Đăng nhập / Cấp quyền AnimAI
+                </button>
+            </div>
+        </div>
+        
+        <!-- Project Selector Panel -->
+        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl mb-8">
+            <div class="flex gap-4 items-end">
+                <div class="flex-1 flex gap-2 items-end">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-slate-400 mb-1">Dự án hiện tại</label>
+                        <select id="project_id" onchange="loadStatus()" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                            <option value="0">-- Chọn dự án --</option>
+                        </select>
+                    </div>
+                    <button onclick="deleteProject()" title="Xóa dự án này" class="bg-red-900/30 hover:bg-red-900/80 text-red-400 font-medium py-2 px-4 rounded-lg border border-red-500/30 transition-colors">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Tạo Dự án mới</label>
+                    <div class="flex gap-2">
+                        <select id="new_project_type" class="bg-slate-900 border border-slate-600 rounded-lg px-2 py-2 text-white focus:outline-none focus:border-blue-500 w-1/3">
+                            <option value="image">Ảnh -> Video</option>
+                            <option value="text">Text -> Video</option>
+                        </select>
+                        <input type="text" id="new_project_name" placeholder="Tên dự án mới..." class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        <button onclick="createProject()" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-6 rounded-lg shadow-lg transition-colors whitespace-nowrap">
+                            <i class="fa-solid fa-plus mr-1"></i> Tạo
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-xl mb-8">
+            <div class="flex justify-between items-start mb-4">
+                <h2 class="text-xl font-bold text-white mt-1">1. Thêm Cảnh & Nhập Kịch Bản</h2>
+                <div class="flex gap-2">
+                    <button id="btnImportJsonImage" onclick="document.getElementById('jsonModal').classList.remove('hidden')" class="bg-amber-600 hover:bg-amber-500 text-white font-medium py-2 px-4 rounded-lg shadow-lg transition-colors text-sm">
+                        <i class="fa-solid fa-file-import mr-2"></i> Nhập Kịch Bản (Dán/Tải)
+                    </button>
+                    <button id="btnImportJsonText" onclick="document.getElementById('jsonModal').classList.remove('hidden')" class="bg-amber-600 hover:bg-amber-500 text-white font-medium py-2 px-4 rounded-lg shadow-lg transition-colors text-sm hidden">
+                        <i class="fa-solid fa-file-import mr-2"></i> Tạo Hàng Loạt Cảnh Text (JSON)
+                    </button>
+                </div>
+            </div>
+            <div class="flex flex-col gap-4">
+                <div id="imageToolsGroup" class="flex gap-4 items-end">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-slate-400 mb-1">Đường dẫn thư mục chứa ảnh (Dành cho dự án Ảnh)</label>
+                        <input type="text" id="folder_path" placeholder="VD: D:\workspace\mmo\trieu_view\images" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500">
+                    </div>
+                    <button onclick="scanFolder()" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-6 rounded-lg shadow-lg transition-colors flex items-center shrink-0">
+                        <i class="fa-solid fa-magnifying-glass mr-2"></i> Quét Ảnh
+                    </button>
+                </div>
+                
+                <div id="textToolsGroup" class="flex gap-4 items-end hidden">
+                    <button onclick="addTextScenes()" class="bg-purple-600 hover:bg-purple-500 text-white font-medium py-2 px-6 rounded-lg shadow-lg transition-colors flex items-center shrink-0" title="Tạo các cảnh trống không cần ảnh, chỉ cần gõ Prompt">
+                        <i class="fa-solid fa-font mr-2"></i> Tạo Cảnh Text Thủ Công
+                    </button>
+                </div>
+            </div>
+            
+            <hr class="border-slate-700 my-6">
+
+            <h2 class="text-xl font-bold mb-4 text-white">2. Điều Khiển (Automate)</h2>
+            <div class="flex items-end gap-4">
+                <div class="flex-1">
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Số luồng (Cores) chạy song song</label>
+                    <input type="number" id="cores" value="1" min="1" max="5" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 mb-4">
+                </div>
+                <div class="flex-[2] flex gap-4 mb-4">
+                    <button onclick="startWorkers()" id="startBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-emerald-900/50">
+                        <i class="fa-solid fa-play"></i> Bắt Đầu Chạy
+                    </button>
+                    <button onclick="stopWorkers()" id="stopBtn" class="flex-1 hidden bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-red-900/50">
+                        <i class="fa-solid fa-stop"></i> Dừng Lại
+                    </button>
+                    <div class="flex-1 flex gap-2">
+                        <select id="transitionSelect" class="bg-slate-900 border border-indigo-600/50 rounded-lg px-2 py-2 text-sm text-indigo-200 focus:outline-none focus:border-indigo-500" title="Hiệu ứng chuyển cảnh">
+                            <option value="none">Gộp Nhanh</option>
+                            <option value="fadewhite">Chớp Flash</option>
+                        </select>
+                        <button onclick="mergeVideos()" id="mergeBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-lg shadow-indigo-900/50 whitespace-nowrap">
+                            <i class="fa-solid fa-film"></i> Gộp Video
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Merged Video Result -->
+        <div id="mergedResultContainer" class="hidden relative bg-slate-800 rounded-xl p-6 border border-indigo-500 shadow-xl shadow-indigo-900/20 mb-8">
+            <button onclick="document.getElementById('mergedResultContainer').classList.add('hidden')" class="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors" title="Ẩn video gộp">
+                <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+            <h2 class="text-xl font-bold mb-4 text-indigo-400"><i class="fa-solid fa-clapperboard"></i> Video Hoàn Chỉnh</h2>
+            <div id="mergedVideoWrapper"></div>
+        </div>
+
+        <!-- Scenes Grid -->
+        <h2 class="text-2xl font-bold mb-6 text-white flex justify-between items-center">
+            <div class="flex items-center gap-4">
+                <span><i class="fa-solid fa-layer-group text-blue-500 mr-2"></i> Danh sách Cảnh</span>
+                <span class="text-lg font-medium bg-slate-700/50 px-3 py-1 rounded-lg text-slate-300">
+                    <span id="completedCount" class="text-emerald-400 font-bold">0</span> / <span id="sceneCount">0</span>
+                </span>
+            </div>
+            <div class="flex items-center gap-2 text-sm font-normal">
+                <label class="text-slate-400">Hiển thị:</label>
+                <select id="gridColsSelect" onchange="document.getElementById('scenesContainer').style.gridTemplateColumns = `repeat(${this.value}, minmax(0, 1fr))`; lastScenesState = ''; loadStatus();" class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white focus:outline-none">
+                    <option value="1">1 Cột</option>
+                    <option value="2" selected>2 Cột</option>
+                    <option value="3">3 Cột</option>
+                    <option value="4">4 Cột</option>
+                    <option value="5">5 Cột</option>
+                </select>
+            </div>
+        </h2>
+        <div id="scenesContainer" class="grid gap-6" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+            <!-- Rendered by JS -->
+        </div>
+    </div>
+
+    <script>
+        async function scanFolder() {
+            const folderPath = document.getElementById('folder_path').value;
+            const projectId = document.getElementById('project_id').value;
+            
+            if(projectId == "0") return alert("Vui lòng chọn hoặc tạo Dự án trước!");
+            if(!folderPath) return alert("Vui lòng nhập đường dẫn thư mục!");
+            
+            const formData = new FormData();
+            formData.append('folder_path', folderPath);
+            formData.append('project_id', projectId);
+            
+            try {
+                const res = await fetch('/api/scan', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    alert(`Quét thành công! Tìm thấy ${data.total_found} ảnh. Đã thêm mới ${data.added} cảnh.`);
+                    loadStatus();
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {
+                alert("Lỗi kết nối server.");
+            }
+        }
+
+        async function addTextScenes() {
+            const projectId = document.getElementById('project_id').value;
+            if(projectId == "0") return alert("Vui lòng chọn hoặc tạo Dự án trước!");
+            
+            const countStr = prompt("Nhập số lượng cảnh Text (chỉ cần chữ, không cần ảnh) muốn tạo thêm:");
+            if (!countStr) return;
+            const count = parseInt(countStr);
+            if (isNaN(count) || count <= 0) return alert("Số lượng không hợp lệ!");
+
+            const formData = new FormData();
+            formData.append('project_id', projectId);
+            formData.append('count', count);
+            
+            try {
+                const res = await fetch('/api/add_text_scenes', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    alert(`Đã thêm thành công ${data.added} cảnh Text!`);
+                    loadStatus();
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {
+                alert("Lỗi kết nối server.");
+            }
+        }
+
+        async function updatePrompt(id) {
+            const prompt = document.getElementById('prompt_' + id).value;
+            const formData = new FormData();
+            formData.append('scene_id', id);
+            formData.append('prompt', prompt);
+            
+            try {
+                await fetch('/api/update_prompt', { method: 'POST', body: formData });
+            } catch (e) {}
+        }
+
+        async function deleteScene(id) {
+            if(!confirm("Bạn có chắc chắn muốn xóa cảnh này không? Hành động này không thể hoàn tác.")) return;
+            const formData = new FormData();
+            formData.append('scene_id', id);
+            
+            try {
+                const res = await fetch('/api/delete_scene', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    // Xóa state cũ để nó load lại UI
+                    lastScenesState = '';
+                    loadStatus();
+                } else {
+                    alert("Lỗi khi xóa cảnh.");
+                }
+            } catch (e) {
+                alert("Lỗi kết nối.");
+            }
+        }
+
+        async function loginServer() {
+            try {
+                const res = await fetch('/api/login_server', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+            } catch (e) {
+                alert("Lỗi kết nối.");
+            }
+        }
+
+        async function startWorkers() {
+            if (document.activeElement) {
+                document.activeElement.blur();
+            }
+            const cores = document.getElementById('cores').value;
+            const projectId = document.getElementById('project_id').value;
+            if(projectId == "0") return alert("Vui lòng chọn Dự án trước!");
+            
+            const formData = new FormData();
+            formData.append('cores', cores);
+            formData.append('project_id', projectId);
+            
+            try {
+                const res = await fetch('/api/start', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    document.getElementById('startBtn').classList.add('hidden');
+                    document.getElementById('stopBtn').classList.remove('hidden');
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {}
+        }
+
+        async function stopWorkers() {
+            try {
+                const res = await fetch('/api/stop', { method: 'POST' });
+                alert("Đã gửi lệnh dừng. Chờ hệ thống xử lý nốt tác vụ hiện tại.");
+                document.getElementById('startBtn').classList.remove('hidden');
+                document.getElementById('stopBtn').classList.add('hidden');
+            } catch (e) {}
+        }
+
+        async function retryScene(id) {
+            const formData = new FormData();
+            formData.append('scene_id', id);
+            
+            try {
+                const res = await fetch('/api/retry', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    await loadStatus();
+                    
+                    // Check if system is running
+                    const isRunning = document.getElementById('startBtn').classList.contains('hidden');
+                    if (!isRunning) {
+                        alert("Đã chuyển cảnh này về trạng thái Đang chờ (Pending).\nHệ thống hiện tại đang nghỉ, vui lòng bấm 'Bắt Đầu Chạy' để tiếp tục!");
+                    }
+                }
+            } catch (e) {}
+        }
+
+        async function startSingleScene(id) {
+            if (document.activeElement) {
+                document.activeElement.blur();
+            }
+            const formData = new FormData();
+            formData.append('scene_id', id);
+            
+            try {
+                const res = await fetch('/api/start_single', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    loadStatus();
+                    alert("Đã kích hoạt 1 luồng riêng biệt để xử lý cảnh này!");
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {}
+        }
+
+        function getStatusColor(status) {
+            switch(status) {
+                case 'Pending': return 'text-slate-400';
+                case 'Processing': return 'text-yellow-400';
+                case 'Completed': return 'text-emerald-400';
+                case 'Error': return 'text-red-400';
+                default: return 'text-slate-400';
+            }
+        }
+
+        let projectsData = {};
+
+        async function loadProjects() {
+            try {
+                const res = await fetch('/api/projects');
+                const data = await res.json();
+                
+                const select = document.getElementById('project_id');
+                const currentVal = select.value;
+                
+                let html = '<option value="0">-- Chọn dự án --</option>';
+                projectsData = {};
+                data.projects.forEach(p => {
+                    projectsData[p.id] = p;
+                    const typeLabel = p.project_type === 'text' ? '[TEXT]' : '[ẢNH]';
+                    html += `<option value="${p.id}">${typeLabel} ${p.name}</option>`;
+                });
+                
+                select.innerHTML = html;
+                if(currentVal !== "0" && data.projects.find(p => p.id == currentVal)) {
+                    select.value = currentVal;
+                } else if (data.projects.length > 0 && currentVal === "0") {
+                    select.value = data.projects[data.projects.length - 1].id;
+                }
+            } catch (e) {}
+        }
+
+        async function createProject() {
+            const name = document.getElementById('new_project_name').value.trim();
+            const projectType = document.getElementById('new_project_type').value;
+            if(!name) return alert("Vui lòng nhập tên dự án!");
+            
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('project_type', projectType);
+            
+            try {
+                const res = await fetch('/api/projects', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    document.getElementById('new_project_name').value = '';
+                    await loadProjects();
+                    document.getElementById('project_id').value = data.project_id;
+                    loadStatus();
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {}
+        }
+
+        async function deleteProject() {
+            const projectId = document.getElementById('project_id').value;
+            if(projectId == "0") return alert("Vui lòng chọn Dự án cần xóa!");
+            
+            if(!confirm("Bạn có chắc chắn muốn xóa Dự án này cùng với toàn bộ phân cảnh bên trong không? Thao tác này không thể hoàn tác!")) return;
+            
+            const formData = new FormData();
+            formData.append('project_id', projectId);
+            
+            try {
+                const res = await fetch('/api/delete_project', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    await loadProjects();
+                    loadStatus();
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {}
+        }
+
+        async function processJsonData(json) {
+            const projectId = document.getElementById('project_id').value;
+            if(projectId == "0") return alert("Vui lòng chọn hoặc tạo Dự án trước!");
+
+            let promptValues = [];
+            if (Array.isArray(json)) {
+                promptValues = json.map(item => {
+                    if (typeof item === 'object' && item !== null) {
+                        return item.camera_instruction || item.prompt || JSON.stringify(item);
+                    }
+                    return item;
+                });
+            } else if (typeof json === 'object') {
+                promptValues = Object.values(json).map(item => {
+                    if (typeof item === 'object' && item !== null) {
+                        return item.camera_instruction || item.prompt || JSON.stringify(item);
+                    }
+                    return item;
+                });
+            }
+            
+            if (promptValues.length === 0) {
+                alert("Dữ liệu JSON không chứa kịch bản hợp lệ!");
+                return;
+            }
+
+            const currentProject = projectsData[projectId];
+            if (currentProject && currentProject.project_type === 'text') {
+                // Bulk create text scenes
+                const formData = new FormData();
+                formData.append('project_id', projectId);
+                formData.append('prompts_json', JSON.stringify(promptValues));
+                
+                try {
+                    const res = await fetch('/api/import_text_json', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    if(data.success) {
+                        alert(`✅ Đã tạo thành công ${data.added} cảnh Text từ JSON!`);
+                        loadStatus();
+                    } else {
+                        alert("Lỗi: " + data.error);
+                    }
+                } catch (e) {
+                    alert("Lỗi kết nối server.");
+                }
+            } else {
+                // Image project -> update existing scenes
+                const textareas = document.querySelectorAll('textarea[id^="prompt_"]');
+                let updateCount = 0;
+                for (let i = 0; i < textareas.length; i++) {
+                    if (i < promptValues.length) {
+                        textareas[i].value = promptValues[i];
+                        const id = textareas[i].id.split('_')[1];
+                        await updatePrompt(id); // Gọi hàm lưu
+                        updateCount++;
+                    }
+                }
+                alert(`✅ Đã đắp kịch bản thành công ${updateCount} / ${textareas.length} ảnh!`);
+            }
+            
+            document.getElementById('jsonModal').classList.add('hidden');
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            document.getElementById('fileName').innerText = file.name;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    await processJsonData(json);
+                } catch (error) {
+                    alert("Lỗi khi đọc file JSON: " + error.message);
+                }
+                event.target.value = ''; // Reset
+            };
+            reader.readAsText(file);
+        }
+
+        async function applyPastedJson() {
+            const text = document.getElementById('pastedJson').value.trim();
+            if (!text) return alert("Vui lòng dán nội dung JSON vào ô!");
+            try {
+                const json = JSON.parse(text);
+                await processJsonData(json);
+                document.getElementById('pastedJson').value = ''; // Reset
+            } catch (error) {
+                alert("Nội dung bạn dán không phải là chuẩn JSON hợp lệ! Lỗi: " + error.message);
+            }
+        }
+
+        async function mergeVideos() {
+            const projectId = document.getElementById('project_id').value;
+            if(projectId == "0") return alert("Vui lòng chọn Dự án!");
+            
+            const btn = document.getElementById('mergeBtn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Đang gộp...';
+            btn.disabled = true;
+            
+            const formData = new FormData();
+            formData.append('project_id', projectId);
+            formData.append('transition', document.getElementById('transitionSelect').value);
+            
+            try {
+                const res = await fetch('/api/merge', { method: 'POST', body: formData });
+                const data = await res.json();
+                if(data.success) {
+                    document.getElementById('mergedResultContainer').classList.remove('hidden');
+                    document.getElementById('mergedVideoWrapper').innerHTML = `
+                        <div class="text-sm text-slate-400 mb-2">Đường dẫn: <span class="text-emerald-400 select-all">${data.merged_video}</span></div>
+                        <video src="/api/video?path=${encodeURIComponent(data.merged_video)}" controls class="w-full rounded-lg bg-black shadow-lg max-h-96 object-contain"></video>
+                    `;
+                    alert("Gộp video thành công!");
+                } else {
+                    alert("Lỗi: " + data.error);
+                }
+            } catch (e) {}
+            
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+
+        let lastScenesState = '';
+        let isDragging = false;
+        let currentProjectId = null;
+        async function loadStatus() {
+            if(isDragging) return;
+            const projectId = document.getElementById('project_id').value;
+            
+            if (projectId !== currentProjectId) {
+                document.getElementById('mergedResultContainer').classList.add('hidden');
+                currentProjectId = projectId;
+                
+                if (projectId != "0") {
+                    try {
+                        const mRes = await fetch('/api/check_merged?project_id=' + projectId);
+                        const mData = await mRes.json();
+                        if (mData.exists) {
+                            document.getElementById('mergedResultContainer').classList.remove('hidden');
+                            document.getElementById('mergedVideoWrapper').innerHTML = `
+                                <div class="text-sm text-slate-400 mb-2">Đường dẫn: <span class="text-emerald-400 select-all">${mData.path}</span></div>
+                                <video src="/api/video?path=${encodeURIComponent(mData.path)}" controls class="w-full rounded-lg bg-black shadow-lg max-h-96 object-contain"></video>
+                            `;
+                        }
+                    } catch(e) {}
+                }
+            }
+            
+            
+            if(projectId == "0") {
+                document.getElementById('scenesContainer').innerHTML = '';
+                document.getElementById('sceneCount').innerText = '0';
+                document.getElementById('completedCount').innerText = '0';
+                lastScenesState = '';
+                document.getElementById('imageToolsGroup').classList.remove('hidden');
+                document.getElementById('textToolsGroup').classList.add('hidden');
+                document.getElementById('btnImportJsonImage').classList.remove('hidden');
+                document.getElementById('btnImportJsonText').classList.add('hidden');
+                return;
+            }
+
+            const currentProject = projectsData[projectId];
+            if (currentProject) {
+                if (currentProject.project_type === 'text') {
+                    document.getElementById('imageToolsGroup').classList.add('hidden');
+                    document.getElementById('textToolsGroup').classList.remove('hidden');
+                    document.getElementById('btnImportJsonImage').classList.add('hidden');
+                    document.getElementById('btnImportJsonText').classList.remove('hidden');
+                } else {
+                    document.getElementById('imageToolsGroup').classList.remove('hidden');
+                    document.getElementById('textToolsGroup').classList.add('hidden');
+                    document.getElementById('btnImportJsonImage').classList.remove('hidden');
+                    document.getElementById('btnImportJsonText').classList.add('hidden');
+                }
+            }
+            
+            try {
+                const res = await fetch('/api/status?project_id=' + projectId);
+                const data = await res.json();
+                
+                const currentState = JSON.stringify(data.scenes.map(s => s.id + '_' + s.status + '_' + (s.error_msg || '') + '_' + (s.video_path || '') + '_' + (s.prompt || '')));
+                
+                document.getElementById('sceneCount').innerText = data.scenes.length;
+                document.getElementById('completedCount').innerText = data.scenes.filter(s => s.status === 'Completed').length;
+                
+                if (data.is_running) {
+                    document.getElementById('startBtn').classList.add('hidden');
+                    document.getElementById('stopBtn').classList.remove('hidden');
+                } else {
+                    document.getElementById('startBtn').classList.remove('hidden');
+                    document.getElementById('stopBtn').classList.add('hidden');
+                }
+
+                const container = document.getElementById('scenesContainer');
+                
+                const activeId = document.activeElement ? document.activeElement.id : null;
+                const colsCount = parseInt(document.getElementById('gridColsSelect').value) || 2;
+                const isDense = colsCount >= 3;
+                
+                let html = '';
+                data.scenes.forEach((s, index) => {
+                    const statusIcon = s.status === 'Processing' ? '<i class="fa-solid fa-circle-notch fa-spin"></i>' : (s.status === 'Completed' ? '<i class="fa-solid fa-check"></i>' : (s.status === 'Error' ? '<i class="fa-solid fa-xmark"></i>' : '<i class="fa-solid fa-clock"></i>'));
+                    
+                    let mediaHtml = '';
+                    if (s.image_path === 'TEXT_ONLY') {
+                        mediaHtml = `<div class="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-500 font-bold p-4 text-center">
+                            <i class="fa-solid fa-font text-3xl mb-2 text-slate-700"></i>
+                            <span class="text-xs tracking-widest text-slate-600">TEXT ONLY</span>
+                        </div>`;
+                    } else {
+                        const isVideo = s.image_path.toLowerCase().endsWith('.mp4') || s.image_path.toLowerCase().endsWith('.mov');
+                        mediaHtml = isVideo 
+                            ? `<video src="/api/image?path=${encodeURIComponent(s.image_path)}" class="w-full h-full object-cover" autoplay loop muted></video>`
+                            : `<img src="/api/image?path=${encodeURIComponent(s.image_path)}" class="w-full h-full object-cover" loading="lazy">`;
+                    }
+
+                    html += `
+                        <div data-id="${s.id}" class="scene-card bg-slate-800 rounded-xl border border-slate-700 p-4 shadow-lg flex flex-col gap-4 cursor-grab active:cursor-grabbing">
+                            <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                                <span class="font-medium text-slate-300"><i class="fa-solid fa-grip-vertical text-slate-500 mr-2"></i> Cảnh #${index + 1}</span>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-bold flex items-center gap-2 ${getStatusColor(s.status)}">
+                                        ${statusIcon} ${s.status}
+                                    </span>
+                                    <button onclick="deleteScene(${s.id})" class="text-slate-500 hover:text-red-500 transition-colors" title="Xóa cảnh này">
+                                        <i class="fa-solid fa-xmark text-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex ${isDense && s.image_path !== 'TEXT_ONLY' ? 'flex-col' : 'flex-row'} gap-4">
+                                ${s.image_path !== 'TEXT_ONLY' ? `
+                                <div class="${isDense ? 'w-full h-40' : 'w-32 h-32'} shrink-0 bg-black rounded-lg overflow-hidden border border-slate-700 relative">
+                                    ${mediaHtml}
+                                </div>` : ''}
+                                <div class="flex-1 flex flex-col">
+                                    <textarea id="prompt_${s.id}" onchange="updatePrompt(${s.id})" class="w-full flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none mb-2 ${isDense ? 'min-h-[100px]' : ''}" placeholder="Nhập prompt cho cảnh này...">${s.prompt || ''}</textarea>
+                                    <div class="flex flex-wrap justify-between items-center gap-2">
+                                        <div class="text-xs text-slate-500 truncate max-w-[150px]" title="${s.image_path}">${s.image_path === 'TEXT_ONLY' ? 'Không dùng ảnh' : s.image_path.split('\\\\').pop().split('/').pop()}</div>
+                                        <div class="flex gap-2">
+                                            ${!(s.status === 'Completed' && s.video_path) ? `
+                                            <button onclick="startSingleScene(${s.id})" class="text-purple-400 hover:text-purple-300 text-sm font-medium transition-colors border border-purple-500/30 px-2 py-1 rounded bg-purple-500/10 whitespace-nowrap">
+                                                <i class="fa-solid fa-play"></i> Tạo Video
+                                            </button>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            ${s.error_msg ? `
+                            <div class="flex items-start justify-between bg-red-900/20 p-2 rounded mt-2">
+                                <div class="text-xs text-red-400 flex-1 min-w-0 break-words max-h-32 overflow-y-auto pr-2">${s.error_msg.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+                                <button onclick="retryScene(${s.id})" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1 rounded transition-colors whitespace-nowrap ml-2 shrink-0">
+                                    <i class="fa-solid fa-rotate-right"></i> Thử lại
+                                </button>
+                            </div>` : ''}
+                            ${s.status === 'Completed' && s.video_path ? `
+                            <div class="mt-2 bg-emerald-900/10 border border-emerald-900/30 rounded-lg p-3">
+                                <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+                                    <div class="text-xs text-emerald-400 whitespace-nowrap"><i class="fa-solid fa-check-circle mr-1"></i> Hoàn thành!</div>
+                                    <button onclick="retryScene(${s.id})" class="bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-1 rounded transition-colors whitespace-nowrap">
+                                        <i class="fa-solid fa-rotate-right"></i> Làm lại video này
+                                    </button>
+                                </div>
+                                <video src="/api/video?path=${encodeURIComponent(s.video_path)}" controls class="w-full rounded-lg bg-black shadow-lg max-h-64 object-contain"></video>
+                            </div>` : ''}
+                        </div>
+                    `;
+                });
+                const isVideoPlaying = Array.from(container.querySelectorAll('video[controls]')).some(v => !v.paused && !v.ended);
+                if (!isVideoPlaying && (!activeId || !activeId.startsWith('prompt_'))) {
+                    if (currentState !== lastScenesState) {
+                        container.innerHTML = html;
+                        lastScenesState = currentState;
+                    }
+                }
+            } catch(e) {}
+        }
+
+        let sortableInstance = null;
+        function initSortable() {
+            const container = document.getElementById('scenesContainer');
+            if(sortableInstance) sortableInstance.destroy();
+            sortableInstance = new Sortable(container, {
+                animation: 150,
+                ghostClass: 'opacity-50',
+                onStart: function() {
+                    isDragging = true;
+                },
+                onEnd: async function(evt) {
+                    isDragging = false;
+                    const items = container.querySelectorAll('.scene-card');
+                    const ids = Array.from(items).map(item => item.getAttribute('data-id'));
+                    const formData = new FormData();
+                    formData.append('scene_ids', ids.join(','));
+                    try {
+                        await fetch('/api/reorder', { method: 'POST', body: formData });
+                    } catch (e) {}
+                }
+            });
+        }
+
+        setInterval(loadStatus, 5000);
+        
+        async function checkLicense() {
+            return true;
+        }
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const isValid = await checkLicense();
+            if (isValid) {
+                await loadProjects();
+                await loadStatus();
+                initSortable();
+            }
+        });
+    </script>
+    <div id="jsonModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-800 border border-slate-600 rounded-xl w-full max-w-2xl overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-slate-700 flex justify-between items-center">
+                <h3 class="text-xl font-bold text-white"><i class="fa-solid fa-file-import text-amber-500 mr-2"></i> Nhập Kịch Bản Tự Động</h3>
+                <button onclick="document.getElementById('jsonModal').classList.add('hidden')" class="text-slate-400 hover:text-white transition-colors"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-4">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Cách 1: Dán trực tiếp nội dung JSON vào đây</label>
+                    <textarea id="pastedJson" rows="6" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-emerald-400 font-mono text-sm focus:outline-none focus:border-blue-500" placeholder='{"cảnh 1": "Nội dung 1...", "cảnh 2": "Nội dung 2..."}'></textarea>
+                </div>
+                
+                <div class="flex items-center gap-4 mb-4">
+                    <div class="flex-1 h-px bg-slate-700"></div>
+                    <span class="text-sm text-slate-500 font-medium">HOẶC</span>
+                    <div class="flex-1 h-px bg-slate-700"></div>
+                </div>
+
+                <div class="mb-4 text-center">
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Cách 2: Chọn file .json từ máy tính</label>
+                    <input type="file" id="jsonInput" accept=".json" class="hidden" onchange="handleFileUpload(event)">
+                    <button onclick="document.getElementById('jsonInput').click()" class="bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 px-6 rounded-lg transition-colors border border-slate-600">
+                        <i class="fa-solid fa-folder-open mr-2"></i> Chọn File .json
+                    </button>
+                    <span id="fileName" class="ml-3 text-sm text-amber-400"></span>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-700 bg-slate-900/50 flex justify-end gap-3">
+                <button onclick="document.getElementById('jsonModal').classList.add('hidden')" class="px-4 py-2 text-slate-400 hover:text-white font-medium transition-colors">Hủy</button>
+                <button onclick="applyPastedJson()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg transition-colors">
+                    <i class="fa-solid fa-check mr-2"></i> Bắt đầu rót chữ
+                </button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

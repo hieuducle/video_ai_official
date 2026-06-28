@@ -1,0 +1,10 @@
+__pycache__/
+output/
+*.mp4
+user_data_core_*/
+user_data/*
+dist/
+build/
+user_data/
+*.zip
+*.exe
