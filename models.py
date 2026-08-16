@@ -29,6 +29,7 @@ class Scene(Base):
     order_index = Column(Integer, default=0)
     image_path = Column(String, nullable=False)
     prompt = Column(Text, nullable=True)
+    duration = Column(Integer, default=7)
     status = Column(String, default="Pending") # Pending, Processing, Completed, Error
     video_url = Column(String, nullable=True) # Direct URL to FB CDN
     video_path = Column(String, nullable=True) # Local path after download
@@ -50,6 +51,12 @@ except Exception as e:
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE scenes ADD COLUMN remote_task_id VARCHAR"))
+except Exception as e:
+    pass
+
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE scenes ADD COLUMN duration INTEGER DEFAULT 7"))
 except Exception as e:
     pass
 

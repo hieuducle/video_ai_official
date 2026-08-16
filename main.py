@@ -189,8 +189,15 @@ async def import_text_json(project_id: int = Form(...), prompts_json: str = Form
     current_order = (max_order.order_index + 1) if max_order else 0
 
     added = 0
-    for prompt_text in prompts:
-        scene = Scene(image_path="TEXT_ONLY", project_id=project_id, order_index=current_order, prompt=prompt_text)
+    for item in prompts:
+        if isinstance(item, dict):
+            prompt_text = item.get("camera_instruction") or item.get("prompt") or item.get("text") or str(item)
+            duration_val = int(item.get("duration_seconds") or item.get("duration") or 7)
+        else:
+            prompt_text = str(item)
+            duration_val = 7
+        duration_val = max(1, min(13, duration_val))
+        scene = Scene(image_path="TEXT_ONLY", project_id=project_id, order_index=current_order, prompt=prompt_text, duration=duration_val)
         session.add(scene)
         current_order += 1
         added += 1
@@ -200,11 +207,13 @@ async def import_text_json(project_id: int = Form(...), prompts_json: str = Form
     return {"success": True, "added": added}
 
 @app.post("/api/update_prompt")
-async def update_prompt(scene_id: int = Form(...), prompt: str = Form(...)):
+async def update_prompt(scene_id: int = Form(...), prompt: str = Form(...), duration: int = Form(None)):
     session = SessionLocal()
     scene = session.query(Scene).filter_by(id=scene_id).first()
     if scene:
         scene.prompt = prompt
+        if duration is not None:
+            scene.duration = max(1, min(13, int(duration)))
         session.commit()
         success = True
     else:
@@ -227,37 +236,51 @@ async def retry_scene(scene_id: int = Form(...)):
     return {"success": success}
 
 @app.post("/api/start")
-async def start_workers(background_tasks: BackgroundTasks, cores: int = Form(1), project_id: int = Form(...)):
+async def start_workers(background_tasks: BackgroundTasks, cores: int = Form(1), project_id: int = Form(...), source_mode: str = Form("start_end"), ai_model: str = Form("gen_01"), execution_mode: str = Form("default")):
     if system_state["is_running"]:
         return {"success": False, "error": "Hệ thống đang chạy."}
     
     session = SessionLocal()
-    pending_count = session.query(Scene).filter(Scene.status.in_(["Pending", "Error"]), Scene.project_id == project_id).count()
+    pending_count = session.query(Scene).filter(Scene.status.in_(["Pending", "Error", "Processing"]), Scene.project_id == project_id).count()
     
     if pending_count == 0:
         session.close()
         return {"success": False, "error": "Tất cả các cảnh đã hoàn thành, không có việc gì để chạy!"}
         
-    error_scenes = session.query(Scene).filter_by(status="Error", project_id=project_id).all()
-    for scene in error_scenes:
+    error_or_proc_scenes = session.query(Scene).filter(Scene.status.in_(["Error", "Processing"]), Scene.project_id == project_id).all()
+    for scene in error_or_proc_scenes:
         scene.status = "Pending"
         scene.error_msg = None
     session.commit()
     session.close()
     
+    if execution_mode in ["single_tab_queue", "single_tab_mobile"]:
+        batch_size = max(1, int(cores))
+        cores = 1
+    else:
+        batch_size = 3
     system_state["is_running"] = True
     system_state["active_cores"] = cores
     
     for i in range(cores):
-        t = threading.Thread(target=worker_loop, args=(i+1, project_id), daemon=True)
+        t = threading.Thread(target=worker_loop, args=(i+1, project_id, None, source_mode, ai_model, execution_mode, batch_size), daemon=True)
         t.start()
         
-    return {"success": True, "message": f"Đã khởi động {cores} luồng cho dự án."}
+    return {"success": True, "message": f"Đã khởi động {cores} luồng cho dự án (giới hạn đợt {batch_size} cảnh)."}
 
 @app.post("/api/stop")
 async def stop_workers():
     system_state["is_running"] = False
-    return {"success": True, "message": "Đã gửi lệnh dừng. Các luồng sẽ dừng sau khi hoàn thành công việc hiện tại."}
+    try:
+        session = SessionLocal()
+        proc_scenes = session.query(Scene).filter(Scene.status == "Processing").all()
+        for scene in proc_scenes:
+            scene.status = "Pending"
+        session.commit()
+        session.close()
+    except Exception as e:
+        print(f"[Stop] Error resetting processing scenes: {e}")
+    return {"success": True, "message": "Đã dừng hệ thống và chuyển trạng thái các cảnh về Pending."}
 
 @app.post("/api/login_server")
 async def api_login_server():
@@ -271,9 +294,25 @@ async def api_login_server():
                     user_data_dir=user_data_dir,
                     headless=False,
                     channel="chrome",
-                    args=['--disable-blink-features=AutomationControlled', '--start-maximized'],
+                    args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-features=IsolateOrigins,site-per-process'],
                     no_viewport=True
                 )
+                # Chặn Chrome hiện popup hỏi quyền truy cập folder cũ (File System Access API)
+                browser.add_init_script("""
+                    const grant = async () => 'granted';
+                    if (window.FileSystemHandle && window.FileSystemHandle.prototype) {
+                        window.FileSystemHandle.prototype.queryPermission = grant;
+                        window.FileSystemHandle.prototype.requestPermission = grant;
+                    }
+                    if (window.FileSystemDirectoryHandle && window.FileSystemDirectoryHandle.prototype) {
+                        window.FileSystemDirectoryHandle.prototype.queryPermission = grant;
+                        window.FileSystemDirectoryHandle.prototype.requestPermission = grant;
+                    }
+                    if (window.FileSystemFileHandle && window.FileSystemFileHandle.prototype) {
+                        window.FileSystemFileHandle.prototype.queryPermission = grant;
+                        window.FileSystemFileHandle.prototype.requestPermission = grant;
+                    }
+                """)
                 page = browser.pages[0] if browser.pages else browser.new_page()
                 page.goto("https://ai.tool98.com/")
                 try:
@@ -304,6 +343,7 @@ async def get_status(project_id: int = 0):
             "id": s.id,
             "image_path": s.image_path,
             "prompt": s.prompt,
+            "duration": getattr(s, 'duration', 7) or 7,
             "status": s.status,
             "video_path": s.video_path,
             "error_msg": s.error_msg
@@ -342,7 +382,7 @@ async def reorder_scenes(scene_ids: str = Form(...)):
     return {"success": True}
 
 @app.post("/api/start_single")
-async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(...)):
+async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(...), source_mode: str = Form("start_end"), ai_model: str = Form("gen_01")):
     session = SessionLocal()
     scene = session.query(Scene).filter_by(id=scene_id).first()
     if not scene:
@@ -356,7 +396,7 @@ async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(.
     session.close()
     
     unique_core_id = 999000 + scene_id
-    t = threading.Thread(target=worker_loop, args=(unique_core_id, project_id, scene_id), daemon=True)
+    t = threading.Thread(target=worker_loop, args=(unique_core_id, project_id, scene_id, source_mode, ai_model, "default"), daemon=True)
     t.start()
     return {"success": True, "message": "Đã bắt đầu tạo video cho cảnh này."}
 

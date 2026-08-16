@@ -90,12 +90,37 @@
             <hr class="border-slate-700 my-6">
 
             <h2 class="text-xl font-bold mb-4 text-white">2. Điều Khiển (Automate)</h2>
-            <div class="flex items-end gap-4">
-                <div class="flex-1">
-                    <label class="block text-sm font-medium text-slate-400 mb-1">Số luồng (Cores) chạy song song</label>
-                    <input type="number" id="cores" value="1" min="1" max="5" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500 mb-4">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Số luồng / Số cảnh mỗi đợt</label>
+                    <input type="number" id="cores" value="3" min="1" max="20" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
                 </div>
-                <div class="flex-[2] flex gap-4 mb-4">
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Nguồn video</label>
+                    <select id="source_mode" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        <option value="start_end">Start/End Refs</option>
+                        <option value="references">Từ Refs</option>
+                        <option value="start_image">Từ Ảnh Chọn</option>
+                        <option value="text">Không cần ảnh</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Model AI</label>
+                    <select id="ai_model" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        <option value="gen_01">Model mới nhất</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-400 mb-1">Chế độ tạo video</label>
+                    <select id="execution_mode" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500">
+                        <option value="default">Mặc định (Từng cảnh / Đa luồng)</option>
+                        <option value="single_tab_queue">1 Tab (Tạo liên tiếp - Hàng đợi)</option>
+                        <option value="single_tab_mobile">1 Tab Mobile (Chạy liên tiếp theo đợt)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-end gap-4 mb-4">
+                <div class="flex-1 flex gap-4">
                     <button onclick="startWorkers()" id="startBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-6 rounded-lg transition-colors shadow-lg shadow-emerald-900/50">
                         <i class="fa-solid fa-play"></i> Bắt Đầu Chạy
                     </button>
@@ -203,9 +228,12 @@
 
         async function updatePrompt(id) {
             const prompt = document.getElementById('prompt_' + id).value;
+            const durEl = document.getElementById('duration_' + id);
+            const duration = durEl ? durEl.value : 7;
             const formData = new FormData();
             formData.append('scene_id', id);
             formData.append('prompt', prompt);
+            formData.append('duration', duration);
             
             try {
                 await fetch('/api/update_prompt', { method: 'POST', body: formData });
@@ -250,9 +278,15 @@
             const projectId = document.getElementById('project_id').value;
             if(projectId == "0") return alert("Vui lòng chọn Dự án trước!");
             
+            const sourceMode = document.getElementById('source_mode') ? document.getElementById('source_mode').value : 'start_end';
+            const aiModel = document.getElementById('ai_model') ? document.getElementById('ai_model').value : 'gen_01';
+            const executionMode = document.getElementById('execution_mode') ? document.getElementById('execution_mode').value : 'default';
             const formData = new FormData();
             formData.append('cores', cores);
             formData.append('project_id', projectId);
+            formData.append('source_mode', sourceMode);
+            formData.append('ai_model', aiModel);
+            formData.append('execution_mode', executionMode);
             
             try {
                 const res = await fetch('/api/start', { method: 'POST', body: formData });
@@ -298,8 +332,12 @@
             if (document.activeElement) {
                 document.activeElement.blur();
             }
+            const sourceMode = document.getElementById('source_mode') ? document.getElementById('source_mode').value : 'start_end';
+            const aiModel = document.getElementById('ai_model') ? document.getElementById('ai_model').value : 'gen_01';
             const formData = new FormData();
             formData.append('scene_id', id);
+            formData.append('source_mode', sourceMode);
+            formData.append('ai_model', aiModel);
             
             try {
                 const res = await fetch('/api/start_single', { method: 'POST', body: formData });
@@ -399,21 +437,21 @@
             if(projectId == "0") return alert("Vui lòng chọn hoặc tạo Dự án trước!");
 
             let promptValues = [];
-            if (Array.isArray(json)) {
-                promptValues = json.map(item => {
-                    if (typeof item === 'object' && item !== null) {
-                        return item.camera_instruction || item.prompt || JSON.stringify(item);
-                    }
-                    return item;
-                });
-            } else if (typeof json === 'object') {
-                promptValues = Object.values(json).map(item => {
-                    if (typeof item === 'object' && item !== null) {
-                        return item.camera_instruction || item.prompt || JSON.stringify(item);
-                    }
-                    return item;
-                });
-            }
+            const items = Array.isArray(json) ? json : (typeof json === 'object' ? Object.values(json) : []);
+            promptValues = items.map(item => {
+                if (typeof item === 'object' && item !== null) {
+                    const promptText = item.camera_instruction || item.prompt || item.text || item.description || JSON.stringify(item);
+                    const dur = parseInt(item.duration_seconds || item.duration || 7, 10);
+                    return {
+                        prompt: promptText,
+                        duration: isNaN(dur) ? 7 : Math.max(1, Math.min(13, dur))
+                    };
+                }
+                return {
+                    prompt: String(item),
+                    duration: 7
+                };
+            });
             
             if (promptValues.length === 0) {
                 alert("Dữ liệu JSON không chứa kịch bản hợp lệ!");
@@ -445,8 +483,10 @@
                 let updateCount = 0;
                 for (let i = 0; i < textareas.length; i++) {
                     if (i < promptValues.length) {
-                        textareas[i].value = promptValues[i];
+                        textareas[i].value = promptValues[i].prompt;
                         const id = textareas[i].id.split('_')[1];
+                        const durEl = document.getElementById('duration_' + id);
+                        if (durEl) durEl.value = promptValues[i].duration;
                         await updatePrompt(id); // Gọi hàm lưu
                         updateCount++;
                     }
@@ -633,6 +673,10 @@
                                 </div>` : ''}
                                 <div class="flex-1 flex flex-col">
                                     <textarea id="prompt_${s.id}" onchange="updatePrompt(${s.id})" class="w-full flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-blue-500 resize-none mb-2 ${isDense ? 'min-h-[100px]' : ''}" placeholder="Nhập prompt cho cảnh này...">${s.prompt || ''}</textarea>
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <label class="text-xs text-slate-400">Số giây (1-13s):</label>
+                                        <input type="number" id="duration_${s.id}" onchange="updatePrompt(${s.id})" value="${s.duration || 7}" min="1" max="13" class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                                    </div>
                                     <div class="flex flex-wrap justify-between items-center gap-2">
                                         <div class="text-xs text-slate-500 truncate max-w-[150px]" title="${s.image_path}">${s.image_path === 'TEXT_ONLY' ? 'Không dùng ảnh' : s.image_path.split('\\\\').pop().split('/').pop()}</div>
                                         <div class="flex gap-2">
@@ -666,7 +710,7 @@
                     `;
                 });
                 const isVideoPlaying = Array.from(container.querySelectorAll('video[controls]')).some(v => !v.paused && !v.ended);
-                if (!isVideoPlaying && (!activeId || !activeId.startsWith('prompt_'))) {
+                if (!isVideoPlaying && (!activeId || (!activeId.startsWith('prompt_') && !activeId.startsWith('duration_')))) {
                     if (currentState !== lastScenesState) {
                         container.innerHTML = html;
                         lastScenesState = currentState;
