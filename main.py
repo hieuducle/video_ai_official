@@ -193,11 +193,13 @@ async def import_text_json(project_id: int = Form(...), prompts_json: str = Form
         if isinstance(item, dict):
             prompt_text = item.get("camera_instruction") or item.get("prompt") or item.get("text") or str(item)
             duration_val = int(item.get("duration_seconds") or item.get("duration") or 7)
+            scene_type = item.get("type") or "ref"
         else:
             prompt_text = str(item)
             duration_val = 7
+            scene_type = "ref"
         duration_val = max(1, min(13, duration_val))
-        scene = Scene(image_path="TEXT_ONLY", project_id=project_id, order_index=current_order, prompt=prompt_text, duration=duration_val)
+        scene = Scene(image_path="TEXT_ONLY", project_id=project_id, order_index=current_order, prompt=prompt_text, duration=duration_val, scene_type=scene_type)
         session.add(scene)
         current_order += 1
         added += 1
@@ -207,13 +209,15 @@ async def import_text_json(project_id: int = Form(...), prompts_json: str = Form
     return {"success": True, "added": added}
 
 @app.post("/api/update_prompt")
-async def update_prompt(scene_id: int = Form(...), prompt: str = Form(...), duration: int = Form(None)):
+async def update_prompt(scene_id: int = Form(...), prompt: str = Form(...), duration: int = Form(None), scene_type: str = Form(None)):
     session = SessionLocal()
     scene = session.query(Scene).filter_by(id=scene_id).first()
     if scene:
         scene.prompt = prompt
         if duration is not None:
             scene.duration = max(1, min(13, int(duration)))
+        if scene_type is not None:
+            scene.scene_type = scene_type
         session.commit()
         success = True
     else:
@@ -346,7 +350,8 @@ async def get_status(project_id: int = 0):
             "duration": getattr(s, 'duration', 7) or 7,
             "status": s.status,
             "video_path": s.video_path,
-            "error_msg": s.error_msg
+            "error_msg": s.error_msg,
+            "scene_type": getattr(s, 'scene_type', 'ref') or 'ref'
         })
     session.close()
     return {"scenes": data, "is_running": system_state["is_running"], "active_cores": system_state["active_cores"]}
@@ -382,7 +387,7 @@ async def reorder_scenes(scene_ids: str = Form(...)):
     return {"success": True}
 
 @app.post("/api/start_single")
-async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(...), source_mode: str = Form("start_end"), ai_model: str = Form("gen_01")):
+async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(...), source_mode: str = Form("start_end"), ai_model: str = Form("gen_01"), execution_mode: str = Form("default")):
     session = SessionLocal()
     scene = session.query(Scene).filter_by(id=scene_id).first()
     if not scene:
@@ -396,7 +401,7 @@ async def start_single(background_tasks: BackgroundTasks, scene_id: int = Form(.
     session.close()
     
     unique_core_id = 999000 + scene_id
-    t = threading.Thread(target=worker_loop, args=(unique_core_id, project_id, scene_id, source_mode, ai_model, "default"), daemon=True)
+    t = threading.Thread(target=worker_loop, args=(unique_core_id, project_id, scene_id, source_mode, ai_model, execution_mode), daemon=True)
     t.start()
     return {"success": True, "message": "Đã bắt đầu tạo video cho cảnh này."}
 

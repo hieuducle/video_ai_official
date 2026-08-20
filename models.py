@@ -35,6 +35,7 @@ class Scene(Base):
     video_path = Column(String, nullable=True) # Local path after download
     remote_task_id = Column(String, nullable=True) # ID on remote server
     error_msg = Column(Text, nullable=True)
+    scene_type = Column(String, default="ref") # "ref" or "start_end"
     
     project = relationship("Project", back_populates="scenes")
 
@@ -57,6 +58,12 @@ except Exception as e:
 try:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE scenes ADD COLUMN duration INTEGER DEFAULT 7"))
+except Exception as e:
+    pass
+
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE scenes ADD COLUMN scene_type VARCHAR DEFAULT 'ref'"))
 except Exception as e:
     pass
 

@@ -229,11 +229,14 @@
         async function updatePrompt(id) {
             const prompt = document.getElementById('prompt_' + id).value;
             const durEl = document.getElementById('duration_' + id);
+            const typeEl = document.getElementById('scene_type_' + id);
             const duration = durEl ? durEl.value : 7;
+            const sceneType = typeEl ? typeEl.value : 'ref';
             const formData = new FormData();
             formData.append('scene_id', id);
             formData.append('prompt', prompt);
             formData.append('duration', duration);
+            formData.append('scene_type', sceneType);
             
             try {
                 await fetch('/api/update_prompt', { method: 'POST', body: formData });
@@ -334,10 +337,12 @@
             }
             const sourceMode = document.getElementById('source_mode') ? document.getElementById('source_mode').value : 'start_end';
             const aiModel = document.getElementById('ai_model') ? document.getElementById('ai_model').value : 'gen_01';
+            const executionMode = document.getElementById('execution_mode') ? document.getElementById('execution_mode').value : 'default';
             const formData = new FormData();
             formData.append('scene_id', id);
             formData.append('source_mode', sourceMode);
             formData.append('ai_model', aiModel);
+            formData.append('execution_mode', executionMode);
             
             try {
                 const res = await fetch('/api/start_single', { method: 'POST', body: formData });
@@ -442,14 +447,17 @@
                 if (typeof item === 'object' && item !== null) {
                     const promptText = item.camera_instruction || item.prompt || item.text || item.description || JSON.stringify(item);
                     const dur = parseInt(item.duration_seconds || item.duration || 7, 10);
+                    const sType = item.type || 'ref';
                     return {
                         prompt: promptText,
-                        duration: isNaN(dur) ? 7 : Math.max(1, Math.min(13, dur))
+                        duration: isNaN(dur) ? 7 : Math.max(1, Math.min(13, dur)),
+                        scene_type: sType
                     };
                 }
                 return {
                     prompt: String(item),
-                    duration: 7
+                    duration: 7,
+                    scene_type: 'ref'
                 };
             });
             
@@ -487,6 +495,8 @@
                         const id = textareas[i].id.split('_')[1];
                         const durEl = document.getElementById('duration_' + id);
                         if (durEl) durEl.value = promptValues[i].duration;
+                        const typeEl = document.getElementById('scene_type_' + id);
+                        if (typeEl) typeEl.value = promptValues[i].scene_type;
                         await updatePrompt(id); // Gọi hàm lưu
                         updateCount++;
                     }
@@ -617,7 +627,7 @@
                 const res = await fetch('/api/status?project_id=' + projectId);
                 const data = await res.json();
                 
-                const currentState = JSON.stringify(data.scenes.map(s => s.id + '_' + s.status + '_' + (s.error_msg || '') + '_' + (s.video_path || '') + '_' + (s.prompt || '')));
+                const currentState = JSON.stringify(data.scenes.map(s => s.id + '_' + s.status + '_' + (s.error_msg || '') + '_' + (s.video_path || '') + '_' + (s.prompt || '') + '_' + (s.scene_type || 'ref')));
                 
                 document.getElementById('sceneCount').innerText = data.scenes.length;
                 document.getElementById('completedCount').innerText = data.scenes.filter(s => s.status === 'Completed').length;
@@ -676,6 +686,11 @@
                                     <div class="flex items-center gap-2 mb-2">
                                         <label class="text-xs text-slate-400">Số giây (1-13s):</label>
                                         <input type="number" id="duration_${s.id}" onchange="updatePrompt(${s.id})" value="${s.duration || 7}" min="1" max="13" class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                                        <label class="text-xs text-slate-400 ml-2">Type:</label>
+                                        <select id="scene_type_${s.id}" onchange="updatePrompt(${s.id})" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500">
+                                            <option value="ref" ${s.scene_type !== 'start_end' ? 'selected' : ''}>Ref (Mặc định)</option>
+                                            <option value="start_end" ${s.scene_type === 'start_end' ? 'selected' : ''}>Start/End</option>
+                                        </select>
                                     </div>
                                     <div class="flex flex-wrap justify-between items-center gap-2">
                                         <div class="text-xs text-slate-500 truncate max-w-[150px]" title="${s.image_path}">${s.image_path === 'TEXT_ONLY' ? 'Không dùng ảnh' : s.image_path.split('\\\\').pop().split('/').pop()}</div>

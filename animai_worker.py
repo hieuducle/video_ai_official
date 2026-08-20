@@ -282,15 +282,21 @@ def check_and_download_completed_scenes_mobile(k, scenes, page, output_dir, sess
         except Exception as e:
             print(f"[Mobile Queue] Lỗi kiểm tra Scene {scene.id}: {e}")
 
-def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir, session, page, batch_size=3):
+def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir, session, page, batch_size=3, target_scene_id=None):
     batch_num = 1
     print(f"[Core {core_id}] Đang truy cập trực tiếp https://ai.tool98.com/mobile ...")
     page.goto("https://ai.tool98.com/mobile", wait_until="domcontentloaded", timeout=60000)
     time.sleep(3)
     
-    while system_state["is_running"]:
+    def is_active():
+        return system_state["is_running"] or (target_scene_id is not None)
+    
+    while is_active():
         try:
-            scenes = session.query(Scene).filter_by(project_id=project_id, status="Pending").order_by(Scene.order_index.asc()).limit(batch_size).all()
+            if target_scene_id:
+                scenes = session.query(Scene).filter_by(id=target_scene_id, status="Pending").all()
+            else:
+                scenes = session.query(Scene).filter_by(project_id=project_id, status="Pending").order_by(Scene.order_index.asc()).limit(batch_size).all()
             if not scenes:
                 print(f"[Core {core_id}] [Mobile Queue] Toàn bộ các cảnh của dự án {project_id} đã hoàn thành!")
                 break
@@ -321,8 +327,8 @@ def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir
             time.sleep(2)
             
             # GIAI ĐOẠN 1: Gửi lần lượt tối đa batch_size cảnh vào hàng đợi Mobile
-            for i, scene in enumerate(scenes):
-                if not system_state["is_running"]:
+            for i, scene in enumerate(scenes):                
+                if not is_active():
                     print(f"[Mobile Queue] Dừng gửi thêm cảnh theo yêu cầu từ người dùng.")
                     break
                     
@@ -333,88 +339,175 @@ def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir
                 scene.status = "Processing"
                 session.commit()
                 
-                # 0. Chuyển về Tab "Reference" trước khi thao tác ảnh ref (đặc biệt quan trọng cho từ video thứ 2)
-                print(f"[Mobile Queue] Chuyển về Tab 'Reference' để quản lý ảnh ref...")
+                scene_type = getattr(scene, 'scene_type', 'ref') or 'ref'
+                image_path = scene.image_path if scene.image_path != "TEXT_ONLY" else None
+                
+                # BƯỚC 1: CHUYỂN SANG TAB VIDEO VÀ CẤU HÌNH THÔNG SỐ (Làm trước khi upload ảnh)
+                print(f"[Mobile Queue] Chuyển sang Tab 'Tạo video' để thiết lập thông số ban đầu...")
                 try:
-                    page.locator('button.m-tab:not([data-tab="video"]), button.m-tab[data-tab="ref"], button.m-tab[data-tab="reference"]').first.click(timeout=2000)
+                    page.locator('button.m-tab[data-tab="video"], button:has-text("Tạo video")').first.click(timeout=3000)
+                    time.sleep(1)
+                except Exception as e:
+                    pass
+                
+                # Chọn Source Mode
+                try:
+                    if scene_type == "start_end":
+                        target_mode = "start_end"
+                    else:
+                        target_mode = 'references' if image_path else 'text'
+                    page.locator('#mVideoSourceMode').select_option(target_mode)
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"[Mobile Queue] Lỗi set source_mode: {e}")
+                
+                # Chọn Thời lượng
+                try:
+                    dur_val = getattr(scene, 'duration', 7) or 7
+                    dur_val = max(3, min(8, int(dur_val)))
+                    page.locator('#mVideoDuration').select_option(str(dur_val))
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"[Mobile Queue] Lỗi set duration: {e}")
+                
+                # Cấu hình Độ phân giải và Tỷ lệ
+                try:
+                    page.locator('#mVideoResolution').select_option("1080P")
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"[Mobile Queue] Lỗi set resolution: {e}")
+                try:
+                    page.locator('#mVideoAspect').select_option("16:9")
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"[Mobile Queue] Lỗi set aspect ratio: {e}")
+                
+                # BƯỚC 2: CHUYỂN VỀ PHẦN REFERENCE ĐỂ XỬ LÝ ẢNH
+                print(f"[Mobile Queue] Cuộn lên phần Reference để xử lý ảnh...")
+                try:
+                    page.evaluate("document.querySelector('#mUploadRefBtn').scrollIntoView({behavior: 'smooth', block: 'center'})")
+                    time.sleep(1)
                 except:
                     pass
-                time.sleep(1) # Delay 1s an toàn sau thao tác
                 
-                # A. Xóa ảnh ref cũ (nếu có) bằng cách ấn nút Xóa trên card Reference và xác nhận OK trong modal
-                print(f"[Mobile Queue] Xóa ảnh ref cũ của cảnh trước (nếu có)...")
+                # A. Xóa ảnh ref cũ của cảnh trước (nếu có)
+                print(f"[Mobile Queue] Xóa ảnh ref cũ (nếu có) trước khi upload...")
                 while True:
-                    ref_del_btn = page.locator('.m-media-card:has(.m-muted:text-is("Reference")) button[data-action="delete"], .m-media-card button[data-action="delete"]').first
-                    if ref_del_btn.is_visible():
-                        try:
-                            ref_del_btn.click(timeout=3000)
+                    try:
+                        # Luôn tìm nút xóa trên card đầu tiên
+                        del_btn = page.locator('#mReferenceGrid .m-media-card button[data-action="delete"], #mReferenceGrid .m-media-card button:has-text("Xóa"), #mReferenceGrid .m-media-card button:has-text("Delete")').first
+                        if del_btn.is_visible():
+                            del_btn.click(timeout=3000)
                             time.sleep(1)
                             # Xác nhận trong modal Xóa (#mModalOk)
-                            modal_ok = page.locator('#mModalOk')
+                            modal_ok = page.locator('#mModalOk, button:has-text("OK"), button:has-text("Xác nhận")').first
                             if modal_ok.is_visible():
                                 modal_ok.click(timeout=3000)
-                                time.sleep(1)
-                        except:
+                            # Đợi 2s để UI xử lý xóa và card biến mất khỏi DOM
+                            time.sleep(2)
+                        else:
                             break
-                    else:
+                    except:
                         break
                         
-                # B. Tải ảnh ref lên (nếu có)
-                image_path = scene.image_path if scene.image_path != "TEXT_ONLY" else None
-                if image_path and os.path.exists(image_path):
-                    print(f"[Mobile Queue] Uploading ref image: {image_path}")
-                    for attempt in range(3):
-                        try:
-                            upload_btn = page.locator('#mUploadRefBtn')
-                            upload_btn.click(timeout=5000)
-                            time.sleep(1) # Delay 1s chờ modal "Chọn nơi lưu Ref" hiện ra
-                            
-                            ref_curr_btn = page.locator('button:has-text("Ref cảnh hiện tại")').first
-                            if ref_curr_btn.is_visible():
-                                print(f"[Mobile Queue] Chọn 'Ref cảnh hiện tại' trong modal...")
-                                with page.expect_file_chooser(timeout=10000) as fc_info:
+                # Hàm tiện ích upload và chọn ảnh
+                def upload_and_select_ref(img_path, label_for_log):
+                    if img_path and img_path != "TEXT_ONLY" and os.path.exists(img_path):
+                        print(f"[Mobile Queue] Uploading {label_for_log}: {img_path}")
+                        for attempt in range(3):
+                            try:
+                                upload_btn = page.locator('#mUploadRefBtn')
+                                
+                                file_chooser = None
+                                try:
+                                    # Kịch bản 1: Bấm Upload mở thẳng File Chooser
+                                    with page.expect_file_chooser(timeout=3000) as fc_info:
+                                        upload_btn.click(timeout=5000)
+                                    file_chooser = fc_info.value
+                                except:
+                                    pass
+                                    
+                                if not file_chooser:
+                                    # Kịch bản 2: Bấm Upload mở Modal, phải bấm tiếp Current scene Ref mới mở File Chooser
+                                    ref_curr_btn = page.locator('button:has-text("Current scene Ref"), button:has-text("Ref cảnh hiện tại")').first
+                                    if ref_curr_btn.is_visible():
+                                        with page.expect_file_chooser(timeout=5000) as fc_info:
+                                            ref_curr_btn.click()
+                                        file_chooser = fc_info.value
+                                        
+                                if not file_chooser:
+                                    raise Exception("Không thể mở được cửa sổ chọn file (File Chooser).")
+                                
+                                file_chooser.set_files(img_path)
+                                print(f"[Mobile Queue] Đã nạp file {label_for_log}, đang đợi ảnh load lên UI (có thể mất 1-2 phút với ảnh 2K)...")
+                                
+                                # Kịch bản 3: Modal xác nhận hiện ra SAU KHI chọn file
+                                time.sleep(1.5)
+                                ref_curr_btn = page.locator('button:has-text("Current scene Ref"), button:has-text("Ref cảnh hiện tại")').first
+                                if ref_curr_btn.is_visible():
                                     ref_curr_btn.click()
-                            else:
-                                with page.expect_file_chooser(timeout=10000) as fc_info:
-                                    upload_btn.click()
-                            file_chooser = fc_info.value
-                            file_chooser.set_files(image_path)
-                            print(f"[Mobile Queue] Đã upload ảnh ref, đợi 8s cho ảnh tải xong và hiển thị trên UI...")
-                            time.sleep(8) # Delay 8s cho ảnh ref tải hoàn tất và card render lên UI
-                            break
+                                    time.sleep(1)
+                                
+                                # Đợi nút Select xuất hiện trên card mới nhất (card ở vị trí đầu tiên)
+                                new_select_btn = page.locator('#mReferenceGrid .m-media-card').first.locator('button[data-action="select"], button:has-text("Select source"), button:has-text("Chọn nguồn")').first
+                                new_select_btn.wait_for(state="visible", timeout=90000)
+                                
+                                print(f"[Mobile Queue] Ảnh {label_for_log} đã load thành công trên UI.")
+                                time.sleep(2) # Đợi thêm chút để hiệu ứng DOM ổn định
+                                break
+                            except Exception as e:
+                                print(f"[Mobile Queue] Upload {label_for_log} attempt {attempt+1} failed: {e}")
+                                time.sleep(2)
+                                
+                        print(f"[Mobile Queue] Bấm chọn Card Reference đầu tiên...")
+                        try:
+                            ref_card = page.locator('#mReferenceGrid .m-media-card').first
+                            ref_card.wait_for(state="visible", timeout=10000)
+                            ref_card.click(timeout=5000)
+                            time.sleep(1)
                         except Exception as e:
-                            print(f"[Mobile Queue] Upload attempt {attempt+1} failed: {e}")
-                            time.sleep(2)
+                            print(f"[Mobile Queue] Lỗi khi bấm chọn card ref: {e}")
                             
-                # C. Chọn card Reference đầu tiên bằng cách bấm vào đó
-                print(f"[Mobile Queue] Bấm chọn Card Reference đầu tiên...")
-                try:
-                    ref_card = page.locator('.m-media-card:has(.m-muted:text-is("Reference")), .m-media-card').first
-                    ref_card.wait_for(state="visible", timeout=30000)
-                    ref_card.click(timeout=5000)
-                    time.sleep(2) # Delay 2s sau bấm chọn card để nút hành động xuất hiện ổn định
-                except Exception as e:
-                    print(f"[Mobile Queue] Lỗi khi bấm chọn card ref: {e}")
+                        print(f"[Mobile Queue] Bấm nút 'Select source' cho {label_for_log} và chờ 2s...")
+                        try:
+                            select_src_btn = page.locator('#mReferenceGrid .m-media-card').first.locator('button[data-action="select"], button:has-text("Select source"), button:has-text("Chọn nguồn")').first
+                            select_src_btn.wait_for(state="visible", timeout=10000)
+                            select_src_btn.click()
+                            time.sleep(2)
+                        except Exception as e:
+                            print(f"[Mobile Queue] Lỗi khi bấm Select source cho {label_for_log}: {e}")
+
+                # Thực thi upload tuỳ mode
+                if scene_type == "start_end" and image_path:
+                    upload_and_select_ref(image_path, "START image")
+                    next_img = None
+                    if i + 1 < len(scenes):
+                        n_p = scenes[i+1].image_path
+                        if n_p and n_p != "TEXT_ONLY":
+                            next_img = n_p
+                    else:
+                        # Nếu đang chạy lẻ 1 cảnh, thử tìm cảnh tiếp theo trong DB
+                        next_scene = session.query(Scene).filter_by(project_id=project_id).filter(Scene.order_index > scene.order_index).order_by(Scene.order_index.asc()).first()
+                        if next_scene and next_scene.image_path and next_scene.image_path != "TEXT_ONLY":
+                            next_img = next_scene.image_path
+                            
+                    if next_img:
+                        upload_and_select_ref(next_img, "END image")
+                    else:
+                        print(f"[Mobile Queue] Không có cảnh kế tiếp để làm ảnh END.")
+                else:
+                    if image_path:
+                        upload_and_select_ref(image_path, "Ref image")
                     
-                # D. Bấm nút "Chọn nguồn" (data-action="select" hoặc "add-ref") và delay 3s
-                print(f"[Mobile Queue] Bấm nút 'Chọn nguồn' và chờ 3s...")
+                # BƯỚC 3: QUAY LẠI PHẦN ĐIỀN PROMPT VÀ BẤM TẠO
+                print(f"[Mobile Queue] Cuộn xuống phần nhập prompt để tạo video...")
                 try:
-                    select_src_btn = page.locator('.m-media-card button[data-action="select"], button:has-text("Chọn nguồn"), button[data-action="add-ref"]').first
-                    select_src_btn.wait_for(state="visible", timeout=30000)
-                    select_src_btn.click()
-                    time.sleep(3) # Đặc biệt đoạn chọn ảnh ref cần delay đủ 3s cho ổn định
-                except Exception as e:
-                    print(f"[Mobile Queue] Lỗi khi bấm Chọn nguồn cho ảnh ref: {e}")
-                    
-                # E. Ấn vào tab "Tạo video" (data-tab="video")
-                print(f"[Mobile Queue] Chuyển sang Tab 'Tạo video'...")
-                try:
-                    page.locator('button.m-tab[data-tab="video"], button:has-text("Tạo video")').first.click()
+                    page.evaluate("document.querySelector('#mPromptVideo').scrollIntoView({behavior: 'smooth', block: 'center'})")
+                    time.sleep(1)
                 except:
                     pass
-                time.sleep(2) # Delay 2s sau khi sang tab Tạo video
                 
-                # F. Nhập prompt và thiết lập thông số video
+                # Nhập prompt
                 prompt_text = scene.prompt or ""
                 for attempt in range(3):
                     try:
@@ -427,25 +520,6 @@ def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir
                     except Exception as e:
                         print(f"[Mobile Queue] Thử điền prompt lần {attempt+1} gặp lỗi ({str(e)}), thử lại...")
                         time.sleep(1)
-                time.sleep(1) # Delay 1s sau mỗi thao tác
-                
-                # Chỉ cấu hình các thông số (Nguồn, Độ phân giải, Thời lượng, Tỷ lệ) ở video đầu tiên (i == 0)
-                if i == 0:
-                    print(f"[Mobile Queue] Cấu hình thông số video lần đầu (Nguồn, Độ phân giải, Thời lượng, Tỷ lệ)...")
-                    # Chọn Nguồn video (#mVideoSourceMode): "references" nếu có ref ảnh, ngược lại chọn "text" hoặc source_mode
-                    try:
-                        target_mode = 'references' if image_path else 'text'
-                        page.locator('#mVideoSourceMode').select_option(target_mode)
-                        time.sleep(1) # Delay 1s
-                    except Exception:
-                        pass
-                        
-                    # Chọn Độ phân giải (#mVideoResolution): "1080P"
-                    try:
-                        page.locator('#mVideoResolution').select_option("1080P")
-                        time.sleep(1) # Delay 1s
-                    except Exception:
-                        pass
                         
                     # Chọn Thời lượng (#mVideoDuration): 8s hoặc theo duration của scene
                     try:
@@ -491,7 +565,7 @@ def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir
                     
             # GIAI ĐOẠN 2: Giám sát liên tục và tải ngay lập tức bất kỳ video nào vừa render xong trong đợt này
             print(f"[Core {core_id}] Đã gửi đủ {len(scenes)} cảnh của Đợt {batch_num}. Bắt đầu giám sát và tải video render xong...")
-            while system_state["is_running"]:
+            while is_active():
                 pending_or_proc = [s for s in scenes if s.status == "Processing"]
                 if not pending_or_proc:
                     print(f"[Core {core_id}] Tất cả {len(scenes)} cảnh (Đợt {batch_num}) đã được render và tải về hoàn tất!")
@@ -499,6 +573,9 @@ def run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir
                     
                 check_and_download_completed_scenes_mobile(len(scenes), scenes, page, output_dir, session)
                 time.sleep(3)
+                
+            if target_scene_id:
+                break
                 
             batch_num += 1
             print(f"[Core {core_id}] ---> Hoàn thành Đợt {batch_num-1}! Chuẩn bị sang Đợt {batch_num} nếu còn cảnh Pending...")
@@ -569,11 +646,12 @@ def worker_loop(core_id, project_id, target_scene_id=None, source_mode="start_en
         session = SessionLocal()
         
         try:
-            if execution_mode == "single_tab_queue" and not target_scene_id:
+            if execution_mode == "single_tab_queue":
+                # Currently single_tab_queue might not fully support target_scene_id, fallback or just run
                 run_single_tab_queue(core_id, project_id, source_mode, ai_model, output_dir, session, page)
                 return
-            if execution_mode == "single_tab_mobile" and not target_scene_id:
-                run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir, session, page, batch_size=batch_size)
+            if execution_mode == "single_tab_mobile":
+                run_single_tab_mobile(core_id, project_id, source_mode, ai_model, output_dir, session, page, batch_size=batch_size, target_scene_id=target_scene_id)
                 return
                 
             while system_state["is_running"] or target_scene_id:
